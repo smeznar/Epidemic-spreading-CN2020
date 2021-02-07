@@ -1,5 +1,5 @@
 # Epidemic spreading Complex Networks 2020
-This repository contains code for Prediction of the effects of epidemic spreading with graph neural networks paper
+This repository contains code for the paper: Prediction of the effects of epidemic spreading with graph neural networks
 from the Complex Networks 2020 conference. The paper can be found [here](https://link.springer.com/chapter/10.1007/978-3-030-65347-7_35?fbclid=IwAR0Ng3BGF014jQOe_1sWvz858dELltSV7zmCpoRdnw3HVZFfL03onmqaE2g)
 and cited as:
 
@@ -58,5 +58,5 @@ Running the code gives a waterfall plot such as the one on the image below
 
 # Simulations
 
-Additional simulation data can be created using the run create_data.py script. The format of simulation data "{time} {score}"
-but should be change to "{node} {time} {score}" for usage.
+Additional simulation data can be created using the run create_data.py script. The format of simulation data is "{time} {score}"
+but should be changed to "{node} {time} {score}" for usage.
