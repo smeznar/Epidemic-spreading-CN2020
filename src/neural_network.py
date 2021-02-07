@@ -76,5 +76,7 @@ def get_evaluation(adj, Y, graph_features, NN, train_indices, test_indices):
         if vls < best_val:
             best_mse = mse
             best_val = vls
-        print("Iteration:", epoch, " Test mse: ", mse, " Val mse: ", vls, " Time: ", time.time()-start)
+        # if epoch % 50 == 0:
+            # print("Iteration:", epoch, " Test mse: ", best_mse, " Val mse: ", best_val, " Time: ", time.time()-start)
+            # start = time.time()
     return best_mse

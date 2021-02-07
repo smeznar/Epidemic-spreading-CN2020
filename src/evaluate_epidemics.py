@@ -11,12 +11,13 @@ from Gin import test_gin
 from Gat import test_gat
 import xgboost as xgb
 import networkx as nx
-import shap
 from node2vec_main import main
+
 
 simulations_path = "../data/wiki_vote_sim/wiki_vote_"
 network_path = "../data/soc-wiki-Vote.mat"
 metric = "Score"  # One of Score/Time
+
 
 @jit(parallel=True, nogil=True, nopython=True)
 def numba_walk_kernel(walk_matrix, node_name, sparse_pointers, sparse_neighbors, num_steps=3, num_walks=100):
@@ -53,16 +54,17 @@ def rank_nodes(network: sparse.csr_matrix, num_walks=1024, max_walk_length=10):
         hashes.append(np.mean(generated_walks))
     return hashes
 
+
 N2VEParams = {"dimensions": 128,  # Number of dimensions (features)
-            "walk_length": 80,  # Length of the walk per source
-            "num_walks": 10,  # Number of walks per source
-            "window_size": 10,  # Context size for optimization
-            "iter": 1,  # Number of epochs in SGD
-            "workers": 8,  # Number of workers
-            "p": 1,  # Return hyper-parameter
-            "q": 1,  # Input hyper-parameter
-            "is_weighted": False,  # Is graph weighted
-            "is_directed": False}  # Is graph directed
+              "walk_length": 80,  # Length of the walk per source
+              "num_walks": 10,  # Number of walks per source
+              "window_size": 10,  # Context size for optimization
+              "iter": 1,  # Number of epochs in SGD
+              "workers": 8,  # Number of workers
+              "p": 1,  # Return hyper-parameter
+              "q": 1,  # Input hyper-parameter
+              "is_weighted": False,  # Is graph weighted
+              "is_directed": False}  # Is graph directed
 
 
 def generate_feature_vector(graph_adj):
@@ -81,111 +83,84 @@ def generate_feature_vector(graph_adj):
     return pd.DataFrame(data={"Average Out Degree": aod, "PageRank": pr, "Degree centrality": dc,
                               "Eigenvector centrality": ei, "Hubs": hubs, "Authorities": auth})
 
-node = []
-score = []
-time = []
-for i in range(5):
-    with open(simulations_path+str(i)+".txt") as file:
-        j = 0
-        for line in file:
-            node.append(j)
-            j += 1
-            l = line.strip().split(" ")
-            time.append(int(l[0]))
-            score.append(int(l[1]))
 
-adj = loadmat(network_path)["graph"]
+if __name__ == '__main__':
+    node = []
+    score = []
+    time = []
+    for i in range(10):
+        with open(simulations_path+str(i)+".txt") as file:
+            for line in file:
+                l = line.strip().split(" ")
+                node.append(int(l[0]))
+                time.append(int(l[1]))
+                score.append(int(l[2]))
 
-df = pd.DataFrame(data={"Node": node, "Time": time, "Score": score})
-ef = df.copy()
-df = df.groupby("Node").mean()
-ff = df.reset_index()
+    adj = loadmat(network_path)["graph"]
 
-for i in range(adj.shape[0]):
-    ef.loc[ef["Node"] == i, metric] = ef[ef["Node"] == i][metric] - float(ff[ff["Node"] == i][metric])
-ef.loc[:, metric] = abs(ef.loc[:, metric])
-ef = ef.groupby("Node").mean()[metric].to_numpy()
+    df = pd.DataFrame(data={"Node": node, "Time": time, "Score": score})
+    ef = df.copy()
+    df = df.groupby("Node").mean()
+    ff = df.reset_index()
 
-nonz = np.linalg.norm(adj.toarray(), ord=0, axis=0) > 0
-ef = ef[nonz]
-adj = adj[nonz]
-adj = adj[:, nonz]
+    for i in range(adj.shape[0]):
+        ef.loc[ef["Node"] == i, metric] = ef[ef["Node"] == i][metric] - float(ff[ff["Node"] == i][metric])
+    ef.loc[:, metric] = abs(ef.loc[:, metric])
+    ef = ef.groupby("Node").mean()[metric].to_numpy()
 
-high_score = df[metric].to_numpy()[nonz]
-ef = (ef - high_score.min()) / (high_score.max() - high_score.min())
-high_score = (high_score - high_score.min()) / (high_score.max() - high_score.min())
-print("Simulation error (averaged)", metric, "MSE: ", mean_squared_error(ef, np.zeros(ef.shape)))
+    nonz = np.linalg.norm(adj.toarray(), ord=0, axis=0) > 0
+    ef = ef[nonz]
+    adj = adj[nonz]
+    adj = adj[:, nonz]
 
-features = generate_feature_vector(adj)
-features = normalize(features, axis=0)
-features = features / np.max(features, axis=0)
+    high_score = df[metric].to_numpy()[nonz]
+    ef = (ef - high_score.min()) / (high_score.max() - high_score.min())
+    high_score = (high_score - high_score.min()) / (high_score.max() - high_score.min())
 
-nodes = np.array([i for i in range(adj.shape[0])])
-rs = KFold(n_splits=5, shuffle=True, random_state=18)
-results = []
-results_ra = []
-results_n2v = []
-results_ga = []
-results_gi = []
+    features = generate_feature_vector(adj)
+    features = normalize(features, axis=0)
+    features = features / np.max(features, axis=0)
 
-emb_ca = features
+    nodes = np.array([i for i in range(adj.shape[0])])
+    rs = KFold(n_splits=5, shuffle=True, random_state=18)
+    results = []
+    results_ra = []
+    results_n2v = []
+    results_ga = []
+    results_gi = []
 
-graph = nx.from_scipy_sparse_matrix(adj)
-model = main(graph, N2VEParams)
-emb_n2v = np.array([model.wv[str(node)] for node in graph.nodes])
+    emb_ca = features
 
-emb_ra = np.random.random((emb_ca.shape[0], 64))
+    graph = nx.from_scipy_sparse_matrix(adj)
+    model = main(graph, N2VEParams)
+    emb_n2v = np.array([model.wv[str(node)] for node in graph.nodes])
 
-for x_test, x_train in rs.split(nodes):
-    results_gi.append(test_gin(adj, features, high_score, x_train, x_test))
-    results_ga.append(test_gat(adj, features, high_score, x_train, x_test))
-    # XGBoost
-    model = xgb.XGBRegressor()
-    model.fit(emb_ca[x_train, :], high_score[x_train])
-    preds = model.predict(emb_ca[x_test])
-    results.append(mean_squared_error(high_score[x_test], preds))
+    emb_ra = np.random.random((emb_ca.shape[0], 64))
 
-    model = xgb.XGBRegressor()
-    model.fit(emb_ra[x_train, :], high_score[x_train])
-    preds = model.predict(emb_ra[x_test])
-    results_ra.append(mean_squared_error(high_score[x_test], preds))
+    for x_test, x_train in rs.split(nodes):
+        results_gi.append(test_gin(adj, features, high_score, x_train, x_test))
+        results_ga.append(test_gat(adj, features, high_score, x_train, x_test))
+        # XGBoost
+        model = xgb.XGBRegressor()
+        model.fit(emb_ca[x_train, :], high_score[x_train])
+        preds = model.predict(emb_ca[x_test])
+        results.append(mean_squared_error(high_score[x_test], preds))
 
-    model = xgb.XGBRegressor()
-    model.fit(emb_n2v[x_train, :], high_score[x_train])
-    preds = model.predict(emb_n2v[x_test])
-    results_n2v.append(mean_squared_error(high_score[x_test], preds))
+        model = xgb.XGBRegressor()
+        model.fit(emb_ra[x_train, :], high_score[x_train])
+        preds = model.predict(emb_ra[x_test])
+        results_ra.append(mean_squared_error(high_score[x_test], preds))
 
-print("")
-print("-----------------------------")
-print("")
-print("CABoost", "MSE:", np.mean(results), "VAR:", np.var(results), "STD:", np.std(results))
-print("Random", "MSE:", np.mean(results_ra), "VAR:", np.var(results_ra), "STD:", np.std(results_ra))
-print("node2vec", "MSE:", np.mean(results_n2v), "VAR:", np.var(results_n2v), "STD:", np.std(results_n2v))
-print("GIN: ", "MSE:", np.mean(results_gi), "VAR:", np.var(results_gi), "STD:", np.std(results_gi))
-print("GAT: ", "MSE:", np.mean(results_ga), "VAR:", np.var(results_ga), "STD:", np.std(results_ga))
-print("")
-print("-----------------------------")
-print("")
+        model = xgb.XGBRegressor()
+        model.fit(emb_n2v[x_train, :], high_score[x_train])
+        preds = model.predict(emb_n2v[x_test])
+        results_n2v.append(mean_squared_error(high_score[x_test], preds))
 
-# SHAP
-data = xgb.DMatrix(data=emb_ca, label=high_score,
-                   feature_names=["Average out degree", "PageRank", "Degree centrality", "Eigenvector centrality",
-                                  "Hubs", "Authorities"])
-model = xgb.train({},
-                  data,
-                  num_boost_round=200,
-                  evals=[(data, 'train')])
-
-index = np.random.randint(0, emb_ca.shape[0])
-
-model_barr = model.save_raw()[4:]
-model.save_raw = lambda: model_barr
-
-explainer = shap.TreeExplainer(model)
-dt = pd.DataFrame(data=emb_ca, columns=["Avg out", "PR", "Deg", "Eigen",
-                                        "Hubs", "Auth"])
-shap_values = explainer.shap_values(dt)
-shap.waterfall_plot(explainer.expected_value, shap_values[index, :], dt.iloc[index, :])
-
-
-
+    print("-----------------------------")
+    print("CABoost", "MSE:", np.mean(results), "VAR:", np.var(results), "STD:", np.std(results))
+    print("Random", "MSE:", np.mean(results_ra), "VAR:", np.var(results_ra), "STD:", np.std(results_ra))
+    print("node2vec", "MSE:", np.mean(results_n2v), "VAR:", np.var(results_n2v), "STD:", np.std(results_n2v))
+    print("GIN: ", "MSE:", np.mean(results_gi), "VAR:", np.var(results_gi), "STD:", np.std(results_gi))
+    print("GAT: ", "MSE:", np.mean(results_ga), "VAR:", np.var(results_ga), "STD:", np.std(results_ga))
+    print("Simulation error (averaged)", metric, "MSE: ", mean_squared_error(ef, np.zeros(ef.shape)))
+    print("-----------------------------")
